@@ -356,4 +356,4 @@ ST7789_WaitForDma(HAL_MAX_DELAY);
 
 ## License
 
-Add your preferred license to the `LICENSE` file.
+MIT
