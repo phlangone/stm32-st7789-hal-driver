@@ -428,6 +428,106 @@ static HAL_StatusTypeDef ST7789_DMA_StartNextChunk(void)
 #endif
 }
 
+static void ST7789_SwapInt32(int32_t *a, int32_t *b)
+{
+    int32_t tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+static HAL_StatusTypeDef ST7789_DrawPixelClipped(int32_t x, int32_t y, uint16_t color)
+{
+    if ((x < 0) ||
+        (y < 0) ||
+        (x >= (int32_t)ST7789_GetWidth()) ||
+        (y >= (int32_t)ST7789_GetHeight()))
+    {
+        return HAL_OK;
+    }
+
+    return ST7789_DrawPixel((uint16_t)x, (uint16_t)y, color);
+}
+
+static HAL_StatusTypeDef ST7789_DrawFastHLineClipped(int32_t x,
+                                                     int32_t y,
+                                                     int32_t w,
+                                                     uint16_t color)
+{
+    int32_t x_end;
+
+    if ((w <= 0) ||
+        (y < 0) ||
+        (y >= (int32_t)ST7789_GetHeight()))
+    {
+        return HAL_OK;
+    }
+
+    x_end = x + w - 1;
+
+    if ((x_end < 0) || (x >= (int32_t)ST7789_GetWidth()))
+    {
+        return HAL_OK;
+    }
+
+    if (x < 0)
+    {
+        x = 0;
+    }
+
+    if (x_end >= (int32_t)ST7789_GetWidth())
+    {
+        x_end = (int32_t)ST7789_GetWidth() - 1;
+    }
+
+    return ST7789_DrawFastHLine((uint16_t)x,
+                                (uint16_t)y,
+                                (uint16_t)(x_end - x + 1),
+                                color);
+}
+
+static HAL_StatusTypeDef ST7789_DrawLineBresenham(int32_t x0,
+                                                  int32_t y0,
+                                                  int32_t x1,
+                                                  int32_t y1,
+                                                  uint16_t color)
+{
+    int32_t dx = (x0 < x1) ? (x1 - x0) : (x0 - x1);
+    int32_t dy = (y0 < y1) ? (y1 - y0) : (y0 - y1);
+    int32_t sx = (x0 < x1) ? 1 : -1;
+    int32_t sy = (y0 < y1) ? 1 : -1;
+    int32_t err = dx - dy;
+
+    while (true)
+    {
+        HAL_StatusTypeDef status = ST7789_DrawPixelClipped(x0, y0, color);
+        if (status != HAL_OK)
+        {
+            return status;
+        }
+
+        if ((x0 == x1) && (y0 == y1))
+        {
+            break;
+        }
+
+        int32_t e2 = 2 * err;
+
+        if (e2 > -dy)
+        {
+            err -= dy;
+            x0 += sx;
+        }
+
+        if (e2 < dx)
+        {
+            err += dx;
+            y0 += sy;
+        }
+    }
+
+    return HAL_OK;
+}
+
 HAL_StatusTypeDef ST7789_WriteCommand(uint8_t command)
 {
     HAL_StatusTypeDef status;
@@ -947,6 +1047,227 @@ HAL_StatusTypeDef ST7789_DrawRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h
 HAL_StatusTypeDef ST7789_FillScreen(uint16_t color)
 {
     return ST7789_FillRect(0U, 0U, st7789.width, st7789.height, color);
+}
+
+HAL_StatusTypeDef ST7789_DrawCircle(uint16_t x0, uint16_t y0, uint16_t r, uint16_t color)
+{
+    int32_t f;
+    int32_t dd_f_x;
+    int32_t dd_f_y;
+    int32_t x;
+    int32_t y;
+
+    if (r == 0U)
+    {
+        return ST7789_DrawPixelClipped((int32_t)x0, (int32_t)y0, color);
+    }
+
+    f = 1 - (int32_t)r;
+    dd_f_x = 1;
+    dd_f_y = -2 * (int32_t)r;
+    x = 0;
+    y = (int32_t)r;
+
+    (void)ST7789_DrawPixelClipped((int32_t)x0, (int32_t)y0 + (int32_t)r, color);
+    (void)ST7789_DrawPixelClipped((int32_t)x0, (int32_t)y0 - (int32_t)r, color);
+    (void)ST7789_DrawPixelClipped((int32_t)x0 + (int32_t)r, (int32_t)y0, color);
+    (void)ST7789_DrawPixelClipped((int32_t)x0 - (int32_t)r, (int32_t)y0, color);
+
+    while (x < y)
+    {
+        if (f >= 0)
+        {
+            y--;
+            dd_f_y += 2;
+            f += dd_f_y;
+        }
+
+        x++;
+        dd_f_x += 2;
+        f += dd_f_x;
+
+        (void)ST7789_DrawPixelClipped((int32_t)x0 + x, (int32_t)y0 + y, color);
+        (void)ST7789_DrawPixelClipped((int32_t)x0 - x, (int32_t)y0 + y, color);
+        (void)ST7789_DrawPixelClipped((int32_t)x0 + x, (int32_t)y0 - y, color);
+        (void)ST7789_DrawPixelClipped((int32_t)x0 - x, (int32_t)y0 - y, color);
+        (void)ST7789_DrawPixelClipped((int32_t)x0 + y, (int32_t)y0 + x, color);
+        (void)ST7789_DrawPixelClipped((int32_t)x0 - y, (int32_t)y0 + x, color);
+        (void)ST7789_DrawPixelClipped((int32_t)x0 + y, (int32_t)y0 - x, color);
+        (void)ST7789_DrawPixelClipped((int32_t)x0 - y, (int32_t)y0 - x, color);
+    }
+
+    return HAL_OK;
+}
+
+HAL_StatusTypeDef ST7789_FillCircle(uint16_t x0, uint16_t y0, uint16_t r, uint16_t color)
+{
+    int32_t f;
+    int32_t dd_f_x;
+    int32_t dd_f_y;
+    int32_t x;
+    int32_t y;
+
+    if (r == 0U)
+    {
+        return ST7789_DrawPixelClipped((int32_t)x0, (int32_t)y0, color);
+    }
+
+    (void)ST7789_DrawFastHLineClipped((int32_t)x0 - (int32_t)r,
+                                      (int32_t)y0,
+                                      (int32_t)(2U * r) + 1,
+                                      color);
+
+    f = 1 - (int32_t)r;
+    dd_f_x = 1;
+    dd_f_y = -2 * (int32_t)r;
+    x = 0;
+    y = (int32_t)r;
+
+    while (x < y)
+    {
+        if (f >= 0)
+        {
+            y--;
+            dd_f_y += 2;
+            f += dd_f_y;
+        }
+
+        x++;
+        dd_f_x += 2;
+        f += dd_f_x;
+
+        (void)ST7789_DrawFastHLineClipped((int32_t)x0 - x, (int32_t)y0 + y, (2 * x) + 1, color);
+        (void)ST7789_DrawFastHLineClipped((int32_t)x0 - x, (int32_t)y0 - y, (2 * x) + 1, color);
+        (void)ST7789_DrawFastHLineClipped((int32_t)x0 - y, (int32_t)y0 + x, (2 * y) + 1, color);
+        (void)ST7789_DrawFastHLineClipped((int32_t)x0 - y, (int32_t)y0 - x, (2 * y) + 1, color);
+    }
+
+    return HAL_OK;
+}
+
+HAL_StatusTypeDef ST7789_DrawTriangle(uint16_t x0,
+                                      uint16_t y0,
+                                      uint16_t x1,
+                                      uint16_t y1,
+                                      uint16_t x2,
+                                      uint16_t y2,
+                                      uint16_t color)
+{
+    HAL_StatusTypeDef status;
+
+    status = ST7789_DrawLineBresenham((int32_t)x0, (int32_t)y0, (int32_t)x1, (int32_t)y1, color);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    status = ST7789_DrawLineBresenham((int32_t)x1, (int32_t)y1, (int32_t)x2, (int32_t)y2, color);
+    if (status != HAL_OK)
+    {
+        return status;
+    }
+
+    return ST7789_DrawLineBresenham((int32_t)x2, (int32_t)y2, (int32_t)x0, (int32_t)y0, color);
+}
+
+HAL_StatusTypeDef ST7789_FillTriangle(uint16_t x0,
+                                      uint16_t y0,
+                                      uint16_t x1,
+                                      uint16_t y1,
+                                      uint16_t x2,
+                                      uint16_t y2,
+                                      uint16_t color)
+{
+    int32_t sx0 = (int32_t)x0;
+    int32_t sy0 = (int32_t)y0;
+    int32_t sx1 = (int32_t)x1;
+    int32_t sy1 = (int32_t)y1;
+    int32_t sx2 = (int32_t)x2;
+    int32_t sy2 = (int32_t)y2;
+    HAL_StatusTypeDef status;
+
+    if (sy0 > sy1)
+    {
+        ST7789_SwapInt32(&sy0, &sy1);
+        ST7789_SwapInt32(&sx0, &sx1);
+    }
+
+    if (sy1 > sy2)
+    {
+        ST7789_SwapInt32(&sy1, &sy2);
+        ST7789_SwapInt32(&sx1, &sx2);
+    }
+
+    if (sy0 > sy1)
+    {
+        ST7789_SwapInt32(&sy0, &sy1);
+        ST7789_SwapInt32(&sx0, &sx1);
+    }
+
+    if (sy0 == sy2)
+    {
+        int32_t min_x = sx0;
+        int32_t max_x = sx0;
+
+        if (sx1 < min_x) { min_x = sx1; }
+        if (sx2 < min_x) { min_x = sx2; }
+        if (sx1 > max_x) { max_x = sx1; }
+        if (sx2 > max_x) { max_x = sx2; }
+
+        return ST7789_DrawFastHLineClipped(min_x, sy0, max_x - min_x + 1, color);
+    }
+
+    for (int32_t y = sy0; y <= sy1; y++)
+    {
+        int32_t a;
+        int32_t b;
+
+        if (sy1 == sy0)
+        {
+            break;
+        }
+
+        a = sx0 + (((sx1 - sx0) * (y - sy0)) / (sy1 - sy0));
+        b = sx0 + (((sx2 - sx0) * (y - sy0)) / (sy2 - sy0));
+
+        if (a > b)
+        {
+            ST7789_SwapInt32(&a, &b);
+        }
+
+        status = ST7789_DrawFastHLineClipped(a, y, b - a + 1, color);
+        if (status != HAL_OK)
+        {
+            return status;
+        }
+    }
+
+    for (int32_t y = sy1; y <= sy2; y++)
+    {
+        int32_t a;
+        int32_t b;
+
+        if (sy2 == sy1)
+        {
+            break;
+        }
+
+        a = sx1 + (((sx2 - sx1) * (y - sy1)) / (sy2 - sy1));
+        b = sx0 + (((sx2 - sx0) * (y - sy0)) / (sy2 - sy0));
+
+        if (a > b)
+        {
+            ST7789_SwapInt32(&a, &b);
+        }
+
+        status = ST7789_DrawFastHLineClipped(a, y, b - a + 1, color);
+        if (status != HAL_OK)
+        {
+            return status;
+        }
+    }
+
+    return HAL_OK;
 }
 
 HAL_StatusTypeDef ST7789_WriteImageRGB565(uint16_t x,
