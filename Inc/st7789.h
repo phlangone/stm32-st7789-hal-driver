@@ -275,179 +275,13 @@ HAL_StatusTypeDef ST7789_FillScreen(uint16_t color);
 HAL_StatusTypeDef ST7789_FillScreenDMA(uint16_t color);
 
 /**
- * @brief Draws a pixel only when it is inside the visible display area.
- * @param x X coordinate.
- * @param y Y coordinate.
- * @param color RGB565 color.
- */
-static inline HAL_StatusTypeDef ST7789_DrawPixelSafe(int32_t x, int32_t y, uint16_t color)
-{
-    if ((x < 0) ||
-        (y < 0) ||
-        (x >= (int32_t)ST7789_GetWidth()) ||
-        (y >= (int32_t)ST7789_GetHeight()))
-    {
-        return HAL_OK;
-    }
-
-    return ST7789_DrawPixel((uint16_t)x, (uint16_t)y, color);
-}
-
-/**
- * @brief Draws a clipped horizontal line.
- * @param x Start X coordinate.
- * @param y Y coordinate.
- * @param w Line width in pixels.
- * @param color RGB565 color.
- */
-static inline HAL_StatusTypeDef ST7789_DrawFastHLineSafe(int32_t x,
-                                                         int32_t y,
-                                                         int32_t w,
-                                                         uint16_t color)
-{
-    int32_t x_end;
-
-    if ((w <= 0) ||
-        (y < 0) ||
-        (y >= (int32_t)ST7789_GetHeight()))
-    {
-        return HAL_OK;
-    }
-
-    x_end = x + w - 1;
-
-    if ((x_end < 0) || (x >= (int32_t)ST7789_GetWidth()))
-    {
-        return HAL_OK;
-    }
-
-    if (x < 0)
-    {
-        x = 0;
-    }
-
-    if (x_end >= (int32_t)ST7789_GetWidth())
-    {
-        x_end = (int32_t)ST7789_GetWidth() - 1;
-    }
-
-    return ST7789_DrawFastHLine((uint16_t)x,
-                                (uint16_t)y,
-                                (uint16_t)(x_end - x + 1),
-                                color);
-}
-
-/**
- * @brief Draws a clipped line using Bresenham's algorithm.
- * @param x0 Start X coordinate.
- * @param y0 Start Y coordinate.
- * @param x1 End X coordinate.
- * @param y1 End Y coordinate.
- * @param color RGB565 color.
- */
-static inline HAL_StatusTypeDef ST7789_DrawLineInternal(int32_t x0,
-                                                        int32_t y0,
-                                                        int32_t x1,
-                                                        int32_t y1,
-                                                        uint16_t color)
-{
-    int32_t dx = (x0 < x1) ? (x1 - x0) : (x0 - x1);
-    int32_t dy = (y0 < y1) ? (y1 - y0) : (y0 - y1);
-    int32_t sx = (x0 < x1) ? 1 : -1;
-    int32_t sy = (y0 < y1) ? 1 : -1;
-    int32_t err = dx - dy;
-
-    while (true)
-    {
-        HAL_StatusTypeDef status = ST7789_DrawPixelSafe(x0, y0, color);
-        if (status != HAL_OK)
-        {
-            return status;
-        }
-
-        if ((x0 == x1) && (y0 == y1))
-        {
-            break;
-        }
-
-        int32_t e2 = 2 * err;
-
-        if (e2 > -dy)
-        {
-            err -= dy;
-            x0 += sx;
-        }
-
-        if (e2 < dx)
-        {
-            err += dx;
-            y0 += sy;
-        }
-    }
-
-    return HAL_OK;
-}
-
-/**
  * @brief Draws a circle outline.
  * @param x0 Circle center X coordinate.
  * @param y0 Circle center Y coordinate.
  * @param r Circle radius in pixels.
  * @param color RGB565 color.
  */
-static inline HAL_StatusTypeDef ST7789_DrawCircle(uint16_t x0,
-                                                  uint16_t y0,
-                                                  uint16_t r,
-                                                  uint16_t color)
-{
-    int32_t f;
-    int32_t dd_f_x;
-    int32_t dd_f_y;
-    int32_t x;
-    int32_t y;
-
-    if (r == 0U)
-    {
-        return ST7789_DrawPixelSafe((int32_t)x0, (int32_t)y0, color);
-    }
-
-    f = 1 - (int32_t)r;
-    dd_f_x = 1;
-    dd_f_y = -2 * (int32_t)r;
-    x = 0;
-    y = (int32_t)r;
-
-    (void)ST7789_DrawPixelSafe((int32_t)x0, (int32_t)y0 + (int32_t)r, color);
-    (void)ST7789_DrawPixelSafe((int32_t)x0, (int32_t)y0 - (int32_t)r, color);
-    (void)ST7789_DrawPixelSafe((int32_t)x0 + (int32_t)r, (int32_t)y0, color);
-    (void)ST7789_DrawPixelSafe((int32_t)x0 - (int32_t)r, (int32_t)y0, color);
-
-    while (x < y)
-    {
-        if (f >= 0)
-        {
-            y--;
-            dd_f_y += 2;
-            f += dd_f_y;
-        }
-
-        x++;
-        dd_f_x += 2;
-        f += dd_f_x;
-
-        (void)ST7789_DrawPixelSafe((int32_t)x0 + x, (int32_t)y0 + y, color);
-        (void)ST7789_DrawPixelSafe((int32_t)x0 - x, (int32_t)y0 + y, color);
-        (void)ST7789_DrawPixelSafe((int32_t)x0 + x, (int32_t)y0 - y, color);
-        (void)ST7789_DrawPixelSafe((int32_t)x0 - x, (int32_t)y0 - y, color);
-        (void)ST7789_DrawPixelSafe((int32_t)x0 + y, (int32_t)y0 + x, color);
-        (void)ST7789_DrawPixelSafe((int32_t)x0 - y, (int32_t)y0 + x, color);
-        (void)ST7789_DrawPixelSafe((int32_t)x0 + y, (int32_t)y0 - x, color);
-        (void)ST7789_DrawPixelSafe((int32_t)x0 - y, (int32_t)y0 - x, color);
-    }
-
-    return HAL_OK;
-}
-
+HAL_StatusTypeDef ST7789_DrawCircle(uint16_t x0, uint16_t y0, uint16_t r, uint16_t color);
 /**
  * @brief Draws a filled circle.
  * @param x0 Circle center X coordinate.
@@ -455,55 +289,7 @@ static inline HAL_StatusTypeDef ST7789_DrawCircle(uint16_t x0,
  * @param r Circle radius in pixels.
  * @param color RGB565 color.
  */
-static inline HAL_StatusTypeDef ST7789_FillCircle(uint16_t x0,
-                                                  uint16_t y0,
-                                                  uint16_t r,
-                                                  uint16_t color)
-{
-    int32_t f;
-    int32_t dd_f_x;
-    int32_t dd_f_y;
-    int32_t x;
-    int32_t y;
-
-    if (r == 0U)
-    {
-        return ST7789_DrawPixelSafe((int32_t)x0, (int32_t)y0, color);
-    }
-
-    (void)ST7789_DrawFastHLineSafe((int32_t)x0 - (int32_t)r,
-                                   (int32_t)y0,
-                                   (int32_t)(2U * r) + 1,
-                                   color);
-
-    f = 1 - (int32_t)r;
-    dd_f_x = 1;
-    dd_f_y = -2 * (int32_t)r;
-    x = 0;
-    y = (int32_t)r;
-
-    while (x < y)
-    {
-        if (f >= 0)
-        {
-            y--;
-            dd_f_y += 2;
-            f += dd_f_y;
-        }
-
-        x++;
-        dd_f_x += 2;
-        f += dd_f_x;
-
-        (void)ST7789_DrawFastHLineSafe((int32_t)x0 - x, (int32_t)y0 + y, (2 * x) + 1, color);
-        (void)ST7789_DrawFastHLineSafe((int32_t)x0 - x, (int32_t)y0 - y, (2 * x) + 1, color);
-        (void)ST7789_DrawFastHLineSafe((int32_t)x0 - y, (int32_t)y0 + x, (2 * y) + 1, color);
-        (void)ST7789_DrawFastHLineSafe((int32_t)x0 - y, (int32_t)y0 - x, (2 * y) + 1, color);
-    }
-
-    return HAL_OK;
-}
-
+HAL_StatusTypeDef ST7789_FillCircle(uint16_t x0, uint16_t y0, uint16_t r, uint16_t color);
 /**
  * @brief Draws a triangle outline.
  * @param x0 First vertex X coordinate.
@@ -514,19 +300,13 @@ static inline HAL_StatusTypeDef ST7789_FillCircle(uint16_t x0,
  * @param y2 Third vertex Y coordinate.
  * @param color RGB565 color.
  */
-static inline HAL_StatusTypeDef ST7789_DrawTriangle(uint16_t x0,
-                                                    uint16_t y0,
-                                                    uint16_t x1,
-                                                    uint16_t y1,
-                                                    uint16_t x2,
-                                                    uint16_t y2,
-                                                    uint16_t color)
-{
-    (void)ST7789_DrawLineInternal((int32_t)x0, (int32_t)y0, (int32_t)x1, (int32_t)y1, color);
-    (void)ST7789_DrawLineInternal((int32_t)x1, (int32_t)y1, (int32_t)x2, (int32_t)y2, color);
-    return ST7789_DrawLineInternal((int32_t)x2, (int32_t)y2, (int32_t)x0, (int32_t)y0, color);
-}
-
+HAL_StatusTypeDef ST7789_DrawTriangle(uint16_t x0,
+                                      uint16_t y0,
+                                      uint16_t x1,
+                                      uint16_t y1,
+                                      uint16_t x2,
+                                      uint16_t y2,
+                                      uint16_t color);
 /**
  * @brief Fills a triangle.
  * @param x0 First vertex X coordinate.
@@ -537,100 +317,13 @@ static inline HAL_StatusTypeDef ST7789_DrawTriangle(uint16_t x0,
  * @param y2 Third vertex Y coordinate.
  * @param color RGB565 color.
  */
-static inline HAL_StatusTypeDef ST7789_FillTriangle(uint16_t x0,
-                                                    uint16_t y0,
-                                                    uint16_t x1,
-                                                    uint16_t y1,
-                                                    uint16_t x2,
-                                                    uint16_t y2,
-                                                    uint16_t color)
-{
-    int32_t sx0 = (int32_t)x0;
-    int32_t sy0 = (int32_t)y0;
-    int32_t sx1 = (int32_t)x1;
-    int32_t sy1 = (int32_t)y1;
-    int32_t sx2 = (int32_t)x2;
-    int32_t sy2 = (int32_t)y2;
-
-#define ST7789_SWAP_INT32(a, b) do { int32_t tmp = (a); (a) = (b); (b) = tmp; } while (0)
-
-    if (sy0 > sy1)
-    {
-        ST7789_SWAP_INT32(sy0, sy1);
-        ST7789_SWAP_INT32(sx0, sx1);
-    }
-
-    if (sy1 > sy2)
-    {
-        ST7789_SWAP_INT32(sy1, sy2);
-        ST7789_SWAP_INT32(sx1, sx2);
-    }
-
-    if (sy0 > sy1)
-    {
-        ST7789_SWAP_INT32(sy0, sy1);
-        ST7789_SWAP_INT32(sx0, sx1);
-    }
-
-    if (sy0 == sy2)
-    {
-        int32_t min_x = sx0;
-        int32_t max_x = sx0;
-
-        if (sx1 < min_x) { min_x = sx1; }
-        if (sx2 < min_x) { min_x = sx2; }
-        if (sx1 > max_x) { max_x = sx1; }
-        if (sx2 > max_x) { max_x = sx2; }
-
-        return ST7789_DrawFastHLineSafe(min_x, sy0, max_x - min_x + 1, color);
-    }
-
-    for (int32_t y = sy0; y <= sy1; y++)
-    {
-        int32_t a;
-        int32_t b;
-
-        if (sy1 == sy0)
-        {
-            break;
-        }
-
-        a = sx0 + (((sx1 - sx0) * (y - sy0)) / (sy1 - sy0));
-        b = sx0 + (((sx2 - sx0) * (y - sy0)) / (sy2 - sy0));
-
-        if (a > b)
-        {
-            ST7789_SWAP_INT32(a, b);
-        }
-
-        (void)ST7789_DrawFastHLineSafe(a, y, b - a + 1, color);
-    }
-
-    for (int32_t y = sy1; y <= sy2; y++)
-    {
-        int32_t a;
-        int32_t b;
-
-        if (sy2 == sy1)
-        {
-            break;
-        }
-
-        a = sx1 + (((sx2 - sx1) * (y - sy1)) / (sy2 - sy1));
-        b = sx0 + (((sx2 - sx0) * (y - sy0)) / (sy2 - sy0));
-
-        if (a > b)
-        {
-            ST7789_SWAP_INT32(a, b);
-        }
-
-        (void)ST7789_DrawFastHLineSafe(a, y, b - a + 1, color);
-    }
-
-#undef ST7789_SWAP_INT32
-
-    return HAL_OK;
-}
+HAL_StatusTypeDef ST7789_FillTriangle(uint16_t x0,
+                                      uint16_t y0,
+                                      uint16_t x1,
+                                      uint16_t y1,
+                                      uint16_t x2,
+                                      uint16_t y2,
+                                      uint16_t color);
 
 /**
  * @brief Writes an RGB565 image to a screen region.
