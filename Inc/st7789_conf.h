@@ -56,6 +56,13 @@
 #define ST7789_USE_DMA             0
 
 /**
+ * @brief Enables optional display test functions.
+ *
+ * Enable this only during board bring-up or display validation.
+ */
+#define ST7789_ENABLE_TESTS        0
+
+/**
  * @brief Defines DMA function behavior when the parallel interface is used.
  *
  * When enabled, DMA functions use the blocking implementation as fallback.
