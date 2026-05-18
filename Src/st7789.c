@@ -1,11 +1,6 @@
 /**
  * @file st7789.c
  * @brief ST7789 TFT display driver implementation.
- *
- * This module implements display communication, initialization, graphics
- * window control, drawing primitives, text writing, bitmap writing and DMA
- * transfers when available. Pin and interface configuration is centralized in
- * @ref st7789_conf.h.
  */
 
 #include "st7789.h"
@@ -16,12 +11,6 @@
 extern SPI_HandleTypeDef ST7789_SPI_HANDLE;
 #endif
 
-/**
- * @brief Internal ST7789 driver context.
- *
- * Holds handles, pins, dimensions, offsets, rotation, inversion state and
- * timeout values used by the public API.
- */
 typedef struct
 {
 #if (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
@@ -114,7 +103,7 @@ static ST7789_HandleTypeDef st7789 =
     .timeout_ms = ST7789_TIMEOUT_MS
 };
 
-/** @brief Internal DMA transfer operation modes. */
+#if (ST7789_USE_DMA != 0)
 typedef enum
 {
     ST7789_DMA_MODE_NONE = 0U,
@@ -123,7 +112,6 @@ typedef enum
     ST7789_DMA_MODE_IMAGE
 } ST7789_DmaMode_t;
 
-/** @brief Internal state of an ongoing DMA transfer. */
 typedef struct
 {
     ST7789_DmaMode_t mode;
@@ -147,6 +135,7 @@ static ST7789_DmaContext_t st7789_dma =
 };
 
 static uint8_t st7789_dma_buffer[ST7789_TX_CHUNK_SIZE];
+#endif
 
 static inline void ST7789_Bus_Select(void)
 {
@@ -308,10 +297,12 @@ static HAL_StatusTypeDef ST7789_Bus_Write(const uint8_t *data, size_t length)
     return HAL_OK;
 }
 
+#if (ST7789_USE_DMA != 0)
 static HAL_StatusTypeDef ST7789_Bus_WriteDMA(const uint8_t *data, uint16_t length)
 {
     return HAL_SPI_Transmit_DMA(st7789.hspi, (uint8_t *)data, length);
 }
+#endif
 #else
 static inline void ST7789_Bus_CommandMode(void)
 {
@@ -352,15 +343,9 @@ static HAL_StatusTypeDef ST7789_Bus_Write(const uint8_t *data, size_t length)
 
     return HAL_OK;
 }
-
-static HAL_StatusTypeDef ST7789_Bus_WriteDMA(const uint8_t *data, uint16_t length)
-{
-    (void)data;
-    (void)length;
-    return HAL_ERROR;
-}
 #endif
 
+#if (ST7789_USE_DMA != 0)
 static void ST7789_DMA_Finish(HAL_StatusTypeDef status)
 {
     ST7789_Bus_Unselect();
@@ -427,6 +412,7 @@ static HAL_StatusTypeDef ST7789_DMA_StartNextChunk(void)
     return HAL_ERROR;
 #endif
 }
+#endif
 
 static void ST7789_SwapInt32(int32_t *a, int32_t *b)
 {
@@ -1339,7 +1325,15 @@ HAL_StatusTypeDef ST7789_WriteImageRGB565(uint16_t x,
 
 HAL_StatusTypeDef ST7789_WriteDataDMA(const uint8_t *data, uint16_t length)
 {
-#if (ST7789_INTERFACE == ST7789_INTERFACE_PARALLEL)
+#if (ST7789_USE_DMA == 0)
+#if ST7789_PARALLEL_DMA_FALLBACK_BLOCKING
+    return ST7789_WriteData(data, length);
+#else
+    (void)data;
+    (void)length;
+    return HAL_ERROR;
+#endif
+#elif (ST7789_INTERFACE == ST7789_INTERFACE_PARALLEL)
 #if ST7789_PARALLEL_DMA_FALLBACK_BLOCKING
     return ST7789_WriteData(data, length);
 #else
@@ -1394,7 +1388,18 @@ HAL_StatusTypeDef ST7789_WriteDataDMA(const uint8_t *data, uint16_t length)
 
 HAL_StatusTypeDef ST7789_FillRectDMA(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
 {
-#if (ST7789_INTERFACE == ST7789_INTERFACE_PARALLEL)
+#if (ST7789_USE_DMA == 0)
+#if ST7789_PARALLEL_DMA_FALLBACK_BLOCKING
+    return ST7789_FillRect(x, y, w, h, color);
+#else
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)color;
+    return HAL_ERROR;
+#endif
+#elif (ST7789_INTERFACE == ST7789_INTERFACE_PARALLEL)
 #if ST7789_PARALLEL_DMA_FALLBACK_BLOCKING
     return ST7789_FillRect(x, y, w, h, color);
 #else
@@ -1476,7 +1481,18 @@ HAL_StatusTypeDef ST7789_WriteImageRGB565DMA(uint16_t x,
                                              uint16_t h,
                                              const uint16_t *image)
 {
-#if (ST7789_INTERFACE == ST7789_INTERFACE_PARALLEL)
+#if (ST7789_USE_DMA == 0)
+#if ST7789_PARALLEL_DMA_FALLBACK_BLOCKING
+    return ST7789_WriteImageRGB565(x, y, w, h, image);
+#else
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)image;
+    return HAL_ERROR;
+#endif
+#elif (ST7789_INTERFACE == ST7789_INTERFACE_PARALLEL)
 #if ST7789_PARALLEL_DMA_FALLBACK_BLOCKING
     return ST7789_WriteImageRGB565(x, y, w, h, image);
 #else
@@ -1767,6 +1783,7 @@ HAL_StatusTypeDef ST7789_DrawBitmapRGB565DMA(uint16_t x,
 
 HAL_StatusTypeDef ST7789_WaitForDma(uint32_t timeout)
 {
+#if (ST7789_USE_DMA != 0)
     uint32_t tickstart = HAL_GetTick();
 
     while (ST7789_IsDmaBusy())
@@ -1781,16 +1798,24 @@ HAL_StatusTypeDef ST7789_WaitForDma(uint32_t timeout)
     }
 
     return st7789_dma.status;
+#else
+    (void)timeout;
+    return HAL_OK;
+#endif
 }
 
 bool ST7789_IsDmaBusy(void)
 {
+#if (ST7789_USE_DMA != 0)
     return st7789_dma.busy;
+#else
+    return false;
+#endif
 }
 
+#if (ST7789_USE_DMA != 0) && (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
 void ST7789_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-#if (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
     if ((!st7789_dma.busy) || (st7789.hspi != hspi))
     {
         return;
@@ -1804,21 +1829,166 @@ void ST7789_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
     {
         (void)ST7789_DMA_StartNextChunk();
     }
-#else
-    (void)hspi;
-#endif
 }
 
 void ST7789_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
-#if (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
     if ((!st7789_dma.busy) || (st7789.hspi != hspi))
     {
         return;
     }
 
     ST7789_DMA_Finish(HAL_ERROR);
-#else
-    (void)hspi;
-#endif
 }
+#endif
+
+#if (ST7789_ENABLE_TESTS != 0)
+static HAL_StatusTypeDef ST7789_Test_Check(HAL_StatusTypeDef status)
+{
+    return (status == HAL_OK) ? HAL_OK : status;
+}
+
+HAL_StatusTypeDef ST7789_Test_ColorBars(void)
+{
+    const uint16_t colors[] = {
+        ST7789_COLOR565(255U, 0U, 0U),
+        ST7789_COLOR565(0U, 255U, 0U),
+        ST7789_COLOR565(0U, 0U, 255U),
+        ST7789_COLOR565(255U, 255U, 0U),
+        ST7789_COLOR565(0U, 255U, 255U),
+        ST7789_COLOR565(255U, 255U, 255U)
+    };
+    uint16_t bar_w = (uint16_t)(ST7789_GetWidth() / 6U);
+    HAL_StatusTypeDef status;
+
+    if (bar_w == 0U)
+    {
+        return HAL_ERROR;
+    }
+
+    for (uint16_t i = 0U; i < 6U; i++)
+    {
+        uint16_t x = (uint16_t)(i * bar_w);
+        uint16_t w = (i == 5U) ? (uint16_t)(ST7789_GetWidth() - x) : bar_w;
+        status = ST7789_FillRect(x, 0U, w, ST7789_GetHeight(), colors[i]);
+        if (status != HAL_OK)
+        {
+            return status;
+        }
+    }
+
+    return HAL_OK;
+}
+
+HAL_StatusTypeDef ST7789_Test_Shapes(void)
+{
+    uint16_t w = ST7789_GetWidth();
+    uint16_t h = ST7789_GetHeight();
+    uint16_t cx = (uint16_t)(w / 2U);
+    uint16_t cy = (uint16_t)(h / 2U);
+    uint16_t r = (w < h) ? (uint16_t)(w / 8U) : (uint16_t)(h / 8U);
+    HAL_StatusTypeDef status;
+
+    status = ST7789_FillScreen(ST7789_COLOR565(0U, 0U, 0U));
+    if (status != HAL_OK) { return status; }
+
+    status = ST7789_DrawRect(10U, 10U, (uint16_t)(w / 3U), (uint16_t)(h / 5U), ST7789_COLOR565(255U, 0U, 0U));
+    if (status != HAL_OK) { return status; }
+
+    status = ST7789_FillRect((uint16_t)(w / 2U), 10U, (uint16_t)(w / 3U), (uint16_t)(h / 5U), ST7789_COLOR565(0U, 255U, 0U));
+    if (status != HAL_OK) { return status; }
+
+    status = ST7789_DrawCircle((uint16_t)(cx - r), cy, r, ST7789_COLOR565(0U, 0U, 255U));
+    if (status != HAL_OK) { return status; }
+
+    status = ST7789_FillCircle((uint16_t)(cx + r), cy, r, ST7789_COLOR565(255U, 255U, 0U));
+    if (status != HAL_OK) { return status; }
+
+    status = ST7789_DrawTriangle(20U, (uint16_t)(h - 20U), (uint16_t)(w / 3U), (uint16_t)(h - 80U), (uint16_t)(w / 2U), (uint16_t)(h - 20U), ST7789_COLOR565(255U, 0U, 255U));
+    if (status != HAL_OK) { return status; }
+
+    return ST7789_FillTriangle((uint16_t)(w / 2U), (uint16_t)(h - 20U), (uint16_t)((2U * w) / 3U), (uint16_t)(h - 80U), (uint16_t)(w - 20U), (uint16_t)(h - 20U), ST7789_COLOR565(0U, 255U, 255U));
+}
+
+HAL_StatusTypeDef ST7789_Test_Rotation(void)
+{
+    ST7789_Rotation_t original = ST7789_GetRotation();
+    const ST7789_Rotation_t rotations[] = {
+        ST7789_ROTATION_0,
+        ST7789_ROTATION_90,
+        ST7789_ROTATION_180,
+        ST7789_ROTATION_270
+    };
+    HAL_StatusTypeDef status;
+
+    for (uint8_t i = 0U; i < 4U; i++)
+    {
+        status = ST7789_SetRotation(rotations[i]);
+        if (status != HAL_OK) { return status; }
+
+        status = ST7789_FillScreen(ST7789_COLOR565(0U, 0U, 0U));
+        if (status != HAL_OK) { return status; }
+
+        status = ST7789_DrawRect(0U, 0U, ST7789_GetWidth(), ST7789_GetHeight(), ST7789_COLOR565(255U, 255U, 255U));
+        if (status != HAL_OK) { return status; }
+
+        status = ST7789_FillCircle((uint16_t)(ST7789_GetWidth() / 2U), (uint16_t)(ST7789_GetHeight() / 2U), 12U, ST7789_COLOR565(255U, 0U, 0U));
+        if (status != HAL_OK) { return status; }
+
+        HAL_Delay(500U);
+    }
+
+    return ST7789_SetRotation(original);
+}
+
+HAL_StatusTypeDef ST7789_Test_Text(const FontDef_t *font)
+{
+    HAL_StatusTypeDef status;
+
+    if (font == NULL)
+    {
+        return HAL_ERROR;
+    }
+
+    status = ST7789_FillScreen(ST7789_COLOR565(0U, 0U, 0U));
+    if (status != HAL_OK) { return status; }
+
+    status = ST7789_DrawTextCentered(0U,
+                                     0U,
+                                     ST7789_GetWidth(),
+                                     ST7789_GetHeight(),
+                                     "ST7789 OK",
+                                     font,
+                                     ST7789_COLOR565(255U, 255U, 255U),
+                                     ST7789_COLOR565(0U, 0U, 0U),
+                                     true,
+                                     1U);
+
+    return ST7789_Test_Check(status);
+}
+
+HAL_StatusTypeDef ST7789_Test_Full(const FontDef_t *font)
+{
+    HAL_StatusTypeDef status;
+
+    status = ST7789_Test_ColorBars();
+    if (status != HAL_OK) { return status; }
+    HAL_Delay(700U);
+
+    status = ST7789_Test_Shapes();
+    if (status != HAL_OK) { return status; }
+    HAL_Delay(700U);
+
+    status = ST7789_Test_Rotation();
+    if (status != HAL_OK) { return status; }
+    HAL_Delay(700U);
+
+    if (font != NULL)
+    {
+        status = ST7789_Test_Text(font);
+        if (status != HAL_OK) { return status; }
+    }
+
+    return HAL_OK;
+}
+#endif
