@@ -1,16 +1,43 @@
 /**
  * @file st7789.c
  * @brief ST7789 TFT display driver implementation.
+ *
+ * This source file implements the public API declared in @ref st7789.h and the
+ * private bus, GPIO, drawing, DMA and test helpers required by the driver.
+ *
+ * @note Only comments were added in this documented version; driver behavior,
+ *       algorithms and public API logic are unchanged.
  */
 
 #include "st7789.h"
 
 #include <stddef.h>
 
+/* -------------------------------------------------------------------------- */
+/** @name External handles
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
 #if (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
 extern SPI_HandleTypeDef ST7789_SPI_HANDLE;
 #endif
+/** @}
+ */
 
+/* -------------------------------------------------------------------------- */
+/** @name Private driver context
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Internal ST7789 driver state and hardware binding.
+ *
+ * The public API is handle-free. This private object stores the selected bus
+ * resources, optional control pins, panel geometry, active rotation and runtime
+ * options derived from @ref st7789_conf.h.
+ */
 typedef struct
 {
 #if (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
@@ -50,6 +77,9 @@ typedef struct
     uint32_t timeout_ms;
 } ST7789_HandleTypeDef;
 
+/**
+ * @brief Single internal display driver instance.
+ */
 static ST7789_HandleTypeDef st7789 =
 {
 #if (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
@@ -104,6 +134,10 @@ static ST7789_HandleTypeDef st7789 =
 };
 
 #if (ST7789_USE_DMA != 0)
+
+/**
+ * @brief DMA transfer mode used by the internal DMA state machine.
+ */
 typedef enum
 {
     ST7789_DMA_MODE_NONE = 0U,
@@ -123,6 +157,9 @@ typedef struct
     volatile HAL_StatusTypeDef status;
 } ST7789_DmaContext_t;
 
+/**
+ * @brief Internal DMA transfer context.
+ */
 static ST7789_DmaContext_t st7789_dma =
 {
     .mode = ST7789_DMA_MODE_NONE,
@@ -136,17 +173,35 @@ static ST7789_DmaContext_t st7789_dma =
 
 static uint8_t st7789_dma_buffer[ST7789_TX_CHUNK_SIZE];
 #endif
+/** @}
+ */
 
+/* -------------------------------------------------------------------------- */
+/** @name Private bus and validation helpers
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Selects the display bus by driving CS active.
+ */
 static inline void ST7789_Bus_Select(void)
 {
     HAL_GPIO_WritePin(st7789.cs_port, st7789.cs_pin, GPIO_PIN_RESET);
 }
 
+/**
+ * @brief Releases the display bus by driving CS inactive.
+ */
 static inline void ST7789_Bus_Unselect(void)
 {
     HAL_GPIO_WritePin(st7789.cs_port, st7789.cs_pin, GPIO_PIN_SET);
 }
 
+/**
+ * @brief Validates the internal configuration before using the driver.
+ * @return HAL_OK when the selected interface and required pins are valid.
+ */
 static HAL_StatusTypeDef ST7789_Core_Validate(void)
 {
     if ((st7789.cs_port == NULL) ||
@@ -197,6 +252,12 @@ static HAL_StatusTypeDef ST7789_Core_Validate(void)
 }
 
 #if ST7789_INIT_GPIO
+/**
+ * @brief Initializes one GPIO output pin when internal GPIO initialization is enabled.
+ * @param GPIOx GPIO port pointer.
+ * @param GPIO_Pin GPIO pin mask.
+ * @return HAL_OK when the pin is valid and initialized, otherwise HAL_ERROR.
+ */
 static HAL_StatusTypeDef ST7789_GPIO_InitPin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -215,6 +276,10 @@ static HAL_StatusTypeDef ST7789_GPIO_InitPin(GPIO_TypeDef *GPIOx, uint16_t GPIO_
     return HAL_OK;
 }
 
+/**
+ * @brief Initializes all configured display GPIO pins.
+ * @return HAL_OK on success, otherwise HAL_ERROR.
+ */
 static HAL_StatusTypeDef ST7789_GPIO_Init(void)
 {
     ST7789_GPIO_CLK_ENABLE();
@@ -263,16 +328,28 @@ static HAL_StatusTypeDef ST7789_GPIO_Init(void)
 #endif
 
 #if (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
+/**
+ * @brief Switches the selected interface to command mode.
+ */
 static inline void ST7789_Bus_CommandMode(void)
 {
     HAL_GPIO_WritePin(st7789.dc_port, st7789.dc_pin, GPIO_PIN_RESET);
 }
 
+/**
+ * @brief Switches the selected interface to data mode.
+ */
 static inline void ST7789_Bus_DataMode(void)
 {
     HAL_GPIO_WritePin(st7789.dc_port, st7789.dc_pin, GPIO_PIN_SET);
 }
 
+/**
+ * @brief Writes a byte buffer through the selected display interface.
+ * @param data Pointer to the bytes to transmit.
+ * @param length Number of bytes to transmit.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 static HAL_StatusTypeDef ST7789_Bus_Write(const uint8_t *data, size_t length)
 {
     size_t offset = 0U;
@@ -298,6 +375,12 @@ static HAL_StatusTypeDef ST7789_Bus_Write(const uint8_t *data, size_t length)
 }
 
 #if (ST7789_USE_DMA != 0)
+/**
+ * @brief Starts a DMA write through the selected display interface when supported.
+ * @param data Pointer to the bytes to transmit.
+ * @param length Number of bytes to transmit.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 static HAL_StatusTypeDef ST7789_Bus_WriteDMA(const uint8_t *data, uint16_t length)
 {
     return HAL_SPI_Transmit_DMA(st7789.hspi, (uint8_t *)data, length);
@@ -314,6 +397,10 @@ static inline void ST7789_Bus_DataMode(void)
     HAL_GPIO_WritePin(st7789.rs_port, st7789.rs_pin, GPIO_PIN_SET);
 }
 
+/**
+ * @brief Writes one byte on the 8-bit 8080 parallel bus.
+ * @param value Byte value to place on D0..D7.
+ */
 static void ST7789_ParallelWrite8(uint8_t value)
 {
     for (uint8_t bit = 0U; bit < 8U; bit++)
@@ -346,6 +433,10 @@ static HAL_StatusTypeDef ST7789_Bus_Write(const uint8_t *data, size_t length)
 #endif
 
 #if (ST7789_USE_DMA != 0)
+/**
+ * @brief Finalizes the active DMA transaction and releases the bus.
+ * @param status Final status assigned to the DMA context.
+ */
 static void ST7789_DMA_Finish(HAL_StatusTypeDef status)
 {
     ST7789_Bus_Unselect();
@@ -358,6 +449,10 @@ static void ST7789_DMA_Finish(HAL_StatusTypeDef status)
     st7789_dma.sent_pixels = 0U;
 }
 
+/**
+ * @brief Starts the next DMA transfer chunk for fill or image operations.
+ * @return HAL_OK when a chunk is started or the transfer is complete.
+ */
 static HAL_StatusTypeDef ST7789_DMA_StartNextChunk(void)
 {
 #if (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
@@ -414,6 +509,11 @@ static HAL_StatusTypeDef ST7789_DMA_StartNextChunk(void)
 }
 #endif
 
+/**
+ * @brief Swaps two signed 32-bit integer values.
+ * @param a Pointer to the first value.
+ * @param b Pointer to the second value.
+ */
 static void ST7789_SwapInt32(int32_t *a, int32_t *b)
 {
     int32_t tmp = *a;
@@ -421,6 +521,13 @@ static void ST7789_SwapInt32(int32_t *a, int32_t *b)
     *b = tmp;
 }
 
+/**
+ * @brief Draws one pixel after clipping signed coordinates against display bounds.
+ * @param x X coordinate.
+ * @param y Y coordinate.
+ * @param color RGB565 color.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 static HAL_StatusTypeDef ST7789_DrawPixelClipped(int32_t x, int32_t y, uint16_t color)
 {
     if ((x < 0) ||
@@ -434,6 +541,14 @@ static HAL_StatusTypeDef ST7789_DrawPixelClipped(int32_t x, int32_t y, uint16_t 
     return ST7789_DrawPixel((uint16_t)x, (uint16_t)y, color);
 }
 
+/**
+ * @brief Draws a clipped horizontal line using signed coordinates.
+ * @param x Start X coordinate.
+ * @param y Y coordinate.
+ * @param w Line width in pixels.
+ * @param color RGB565 color.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 static HAL_StatusTypeDef ST7789_DrawFastHLineClipped(int32_t x,
                                                      int32_t y,
                                                      int32_t w,
@@ -471,6 +586,15 @@ static HAL_StatusTypeDef ST7789_DrawFastHLineClipped(int32_t x,
                                 color);
 }
 
+/**
+ * @brief Draws a line using Bresenham's algorithm.
+ * @param x0 Start X coordinate.
+ * @param y0 Start Y coordinate.
+ * @param x1 End X coordinate.
+ * @param y1 End Y coordinate.
+ * @param color RGB565 color.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 static HAL_StatusTypeDef ST7789_DrawLineBresenham(int32_t x0,
                                                   int32_t y0,
                                                   int32_t x1,
@@ -514,6 +638,20 @@ static HAL_StatusTypeDef ST7789_DrawLineBresenham(int32_t x0,
     return HAL_OK;
 }
 
+/** @}
+ */
+
+/* -------------------------------------------------------------------------- */
+/** @name Public low-level transfer API
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Sends a raw command byte to the ST7789 controller.
+ * @param command Command code.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_WriteCommand(uint8_t command)
 {
     HAL_StatusTypeDef status;
@@ -531,6 +669,12 @@ HAL_StatusTypeDef ST7789_WriteCommand(uint8_t command)
     return status;
 }
 
+/**
+ * @brief Sends a raw data buffer to the ST7789 controller.
+ * @param data Pointer to data bytes.
+ * @param length Number of bytes to send.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_WriteData(const uint8_t *data, size_t length)
 {
     HAL_StatusTypeDef status;
@@ -553,6 +697,13 @@ HAL_StatusTypeDef ST7789_WriteData(const uint8_t *data, size_t length)
     return status;
 }
 
+/**
+ * @brief Sends a command followed by an optional data buffer.
+ * @param command Command code.
+ * @param data Pointer to data bytes, or NULL when length is zero.
+ * @param length Number of data bytes.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_WriteCommandData(uint8_t command, const uint8_t *data, size_t length)
 {
     HAL_StatusTypeDef status;
@@ -587,6 +738,19 @@ HAL_StatusTypeDef ST7789_WriteCommandData(uint8_t command, const uint8_t *data, 
     return status;
 }
 
+/** @}
+ */
+
+/* -------------------------------------------------------------------------- */
+/** @name Public initialization and display control API
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Performs a hardware reset using the configured RST pin.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_Reset(void)
 {
     if (ST7789_Core_Validate() != HAL_OK)
@@ -616,6 +780,12 @@ HAL_StatusTypeDef ST7789_Reset(void)
     return HAL_OK;
 }
 
+/**
+ * @brief Sends a list of initialization or configuration commands.
+ * @param cmds Pointer to the command list.
+ * @param count Number of commands in the list.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_RunCommandList(const ST7789_InitCmd_t *cmds, size_t count)
 {
     if ((cmds == NULL) && (count > 0U))
@@ -640,6 +810,11 @@ HAL_StatusTypeDef ST7789_RunCommandList(const ST7789_InitCmd_t *cmds, size_t cou
     return HAL_OK;
 }
 
+/**
+ * @brief Controls the configured backlight pin.
+ * @param enable true to enable the backlight, false to disable it.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_SetBacklight(bool enable)
 {
     if (ST7789_Core_Validate() != HAL_OK)
@@ -660,22 +835,40 @@ HAL_StatusTypeDef ST7789_SetBacklight(bool enable)
     return HAL_OK;
 }
 
+/**
+ * @brief Turns the display output on.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DisplayOn(void)
 {
     return ST7789_WriteCommand(ST7789_CMD_DISPON);
 }
 
+/**
+ * @brief Turns the display output off.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DisplayOff(void)
 {
     return ST7789_WriteCommand(ST7789_CMD_DISPOFF);
 }
 
+/**
+ * @brief Enables or disables display color inversion.
+ * @param enable true to enable inversion, false to disable it.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_InvertDisplay(bool enable)
 {
     st7789.inverted = enable;
     return ST7789_WriteCommand(enable ? ST7789_CMD_INVON : ST7789_CMD_INVOFF);
 }
 
+/**
+ * @brief Sets the active display rotation and updates logical width/height.
+ * @param rotation Requested display orientation.
+ * @return HAL_OK on success, otherwise HAL_ERROR for invalid rotation.
+ */
 HAL_StatusTypeDef ST7789_SetRotation(ST7789_Rotation_t rotation)
 {
     uint8_t madctl = st7789.madctl_color_order;
@@ -691,24 +884,25 @@ HAL_StatusTypeDef ST7789_SetRotation(ST7789_Rotation_t rotation)
     switch (rotation)
     {
         case ST7789_ROTATION_0:
+            madctl |= ST7789_ROTATION_0_MADCTL;
             st7789.width = st7789.panel_width;
             st7789.height = st7789.panel_height;
             break;
 
         case ST7789_ROTATION_90:
-            madctl |= (ST7789_MADCTL_MV | ST7789_MADCTL_MX);
+            madctl |= ST7789_ROTATION_90_MADCTL;
             st7789.width = st7789.panel_height;
             st7789.height = st7789.panel_width;
             break;
 
         case ST7789_ROTATION_180:
-            madctl |= (ST7789_MADCTL_MX | ST7789_MADCTL_MY);
+            madctl |= ST7789_ROTATION_180_MADCTL;
             st7789.width = st7789.panel_width;
             st7789.height = st7789.panel_height;
             break;
 
         case ST7789_ROTATION_270:
-            madctl |= (ST7789_MADCTL_MV | ST7789_MADCTL_MY);
+            madctl |= ST7789_ROTATION_270_MADCTL;
             st7789.width = st7789.panel_height;
             st7789.height = st7789.panel_width;
             break;
@@ -719,9 +913,16 @@ HAL_StatusTypeDef ST7789_SetRotation(ST7789_Rotation_t rotation)
 
     status = ST7789_WriteCommandData(ST7789_CMD_MADCTL, &madctl, 1U);
     HAL_Delay(1U);
+
     return status;
 }
 
+/**
+ * @brief Initializes the display and optionally sends extra commands.
+ * @param extra_cmds Optional extra command list.
+ * @param extra_count Number of extra commands.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_InitEx(const ST7789_InitCmd_t *extra_cmds, size_t extra_count)
 {
     uint8_t color_mode = ST7789_COLOR_MODE_16BIT;
@@ -804,26 +1005,68 @@ HAL_StatusTypeDef ST7789_InitEx(const ST7789_InitCmd_t *extra_cmds, size_t extra
     return ST7789_SetBacklight(true);
 }
 
+/**
+ * @brief Initializes the display using the default command sequence.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_Init(void)
 {
     return ST7789_InitEx(NULL, 0U);
 }
 
+/** @}
+ */
+
+/* -------------------------------------------------------------------------- */
+/** @name Public display state getters
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Gets the current logical display width.
+ * @return Width in pixels after rotation handling.
+ */
 uint16_t ST7789_GetWidth(void)
 {
     return st7789.width;
 }
 
+/**
+ * @brief Gets the current logical display height.
+ * @return Height in pixels after rotation handling.
+ */
 uint16_t ST7789_GetHeight(void)
 {
     return st7789.height;
 }
 
+/**
+ * @brief Gets the current display rotation.
+ * @return Current rotation value.
+ */
 ST7789_Rotation_t ST7789_GetRotation(void)
 {
     return st7789.rotation;
 }
 
+/** @}
+ */
+
+/* -------------------------------------------------------------------------- */
+/** @name Public drawing API
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Sets the active GRAM address window for following pixel writes.
+ * @param x0 Start X coordinate.
+ * @param y0 Start Y coordinate.
+ * @param x1 End X coordinate.
+ * @param y1 End Y coordinate.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_SetAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
     uint16_t xo;
@@ -896,6 +1139,13 @@ HAL_StatusTypeDef ST7789_SetAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1,
     return ST7789_WriteCommand(ST7789_CMD_RAMWR);
 }
 
+/**
+ * @brief Draws one pixel.
+ * @param x X coordinate.
+ * @param y Y coordinate.
+ * @param color RGB565 color.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawPixel(uint16_t x, uint16_t y, uint16_t color)
 {
     uint8_t data[2];
@@ -916,6 +1166,10 @@ HAL_StatusTypeDef ST7789_DrawPixel(uint16_t x, uint16_t y, uint16_t color)
     return ST7789_WriteData(data, 2U);
 }
 
+/**
+ * @brief Fills a rectangular region with a single RGB565 color.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
 {
     uint8_t burst[ST7789_TX_CHUNK_SIZE];
@@ -987,16 +1241,28 @@ HAL_StatusTypeDef ST7789_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h
     return HAL_OK;
 }
 
+/**
+ * @brief Draws a horizontal line.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawFastHLine(uint16_t x, uint16_t y, uint16_t w, uint16_t color)
 {
     return ST7789_FillRect(x, y, w, 1U, color);
 }
 
+/**
+ * @brief Draws a vertical line.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawFastVLine(uint16_t x, uint16_t y, uint16_t h, uint16_t color)
 {
     return ST7789_FillRect(x, y, 1U, h, color);
 }
 
+/**
+ * @brief Draws a rectangle outline.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
 {
     HAL_StatusTypeDef status;
@@ -1030,11 +1296,20 @@ HAL_StatusTypeDef ST7789_DrawRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h
     return status;
 }
 
+/**
+ * @brief Fills the entire screen with one color.
+ * @param color RGB565 color.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_FillScreen(uint16_t color)
 {
     return ST7789_FillRect(0U, 0U, st7789.width, st7789.height, color);
 }
 
+/**
+ * @brief Draws a circle outline.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawCircle(uint16_t x0, uint16_t y0, uint16_t r, uint16_t color)
 {
     int32_t f;
@@ -1085,6 +1360,10 @@ HAL_StatusTypeDef ST7789_DrawCircle(uint16_t x0, uint16_t y0, uint16_t r, uint16
     return HAL_OK;
 }
 
+/**
+ * @brief Draws a filled circle.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_FillCircle(uint16_t x0, uint16_t y0, uint16_t r, uint16_t color)
 {
     int32_t f;
@@ -1131,6 +1410,10 @@ HAL_StatusTypeDef ST7789_FillCircle(uint16_t x0, uint16_t y0, uint16_t r, uint16
     return HAL_OK;
 }
 
+/**
+ * @brief Draws a triangle outline.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawTriangle(uint16_t x0,
                                       uint16_t y0,
                                       uint16_t x1,
@@ -1156,6 +1439,10 @@ HAL_StatusTypeDef ST7789_DrawTriangle(uint16_t x0,
     return ST7789_DrawLineBresenham((int32_t)x2, (int32_t)y2, (int32_t)x0, (int32_t)y0, color);
 }
 
+/**
+ * @brief Draws a filled triangle.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_FillTriangle(uint16_t x0,
                                       uint16_t y0,
                                       uint16_t x1,
@@ -1256,6 +1543,10 @@ HAL_StatusTypeDef ST7789_FillTriangle(uint16_t x0,
     return HAL_OK;
 }
 
+/**
+ * @brief Writes an RGB565 image to a rectangular region.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_WriteImageRGB565(uint16_t x,
                                           uint16_t y,
                                           uint16_t w,
@@ -1323,6 +1614,21 @@ HAL_StatusTypeDef ST7789_WriteImageRGB565(uint16_t x,
     return HAL_OK;
 }
 
+/** @}
+ */
+
+/* -------------------------------------------------------------------------- */
+/** @name Public DMA API
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Writes raw data using DMA when supported by the selected interface.
+ * @param data Pointer to the data buffer.
+ * @param length Number of bytes to transmit.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_WriteDataDMA(const uint8_t *data, uint16_t length)
 {
 #if (ST7789_USE_DMA == 0)
@@ -1386,6 +1692,10 @@ HAL_StatusTypeDef ST7789_WriteDataDMA(const uint8_t *data, uint16_t length)
 #endif
 }
 
+/**
+ * @brief Fills a rectangular region using DMA when supported.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_FillRectDMA(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
 {
 #if (ST7789_USE_DMA == 0)
@@ -1470,11 +1780,20 @@ HAL_StatusTypeDef ST7789_FillRectDMA(uint16_t x, uint16_t y, uint16_t w, uint16_
 #endif
 }
 
+/**
+ * @brief Fills the entire screen using DMA when supported.
+ * @param color RGB565 color.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_FillScreenDMA(uint16_t color)
 {
     return ST7789_FillRectDMA(0U, 0U, st7789.width, st7789.height, color);
 }
 
+/**
+ * @brief Writes an RGB565 image using DMA when supported.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_WriteImageRGB565DMA(uint16_t x,
                                              uint16_t y,
                                              uint16_t w,
@@ -1548,16 +1867,39 @@ HAL_StatusTypeDef ST7789_WriteImageRGB565DMA(uint16_t x,
 #endif
 }
 
+/** @}
+ */
+
+/* -------------------------------------------------------------------------- */
+/** @name Public text and bitmap API
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Gets the width of characters in a font.
+ * @param font Pointer to the font definition.
+ * @return Character width in pixels, or 0 when font is NULL.
+ */
 uint16_t ST7789_CharWidth(const FontDef_t *font)
 {
     return (font == NULL) ? 0U : font->width;
 }
 
+/**
+ * @brief Gets the height of characters in a font.
+ * @param font Pointer to the font definition.
+ * @return Character height in pixels, or 0 when font is NULL.
+ */
 uint16_t ST7789_CharHeight(const FontDef_t *font)
 {
     return (font == NULL) ? 0U : font->height;
 }
 
+/**
+ * @brief Computes the rendered width of a single-line string.
+ * @return Width in pixels, or 0 for invalid input.
+ */
 uint16_t ST7789_TextWidth(const FontDef_t *font, const char *text, uint16_t spacing)
 {
     uint16_t width = 0U;
@@ -1587,6 +1929,10 @@ uint16_t ST7789_TextWidth(const FontDef_t *font, const char *text, uint16_t spac
     return width;
 }
 
+/**
+ * @brief Draws one character using the provided font and colors.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawChar(uint16_t x,
                                   uint16_t y,
                                   char ch,
@@ -1647,6 +1993,10 @@ HAL_StatusTypeDef ST7789_DrawChar(uint16_t x,
     return HAL_OK;
 }
 
+/**
+ * @brief Draws a null-terminated string.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawText(uint16_t x,
                                   uint16_t y,
                                   const char *text,
@@ -1683,6 +2033,10 @@ HAL_StatusTypeDef ST7789_DrawText(uint16_t x,
     return HAL_OK;
 }
 
+/**
+ * @brief Draws a string centered inside a rectangular area.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawTextCentered(uint16_t x,
                                           uint16_t y,
                                           uint16_t w,
@@ -1720,6 +2074,10 @@ HAL_StatusTypeDef ST7789_DrawTextCentered(uint16_t x,
     return ST7789_DrawText(draw_x, draw_y, text, font, fg, bg, transparent, spacing);
 }
 
+/**
+ * @brief Draws a monochrome bitmap.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawBitmapMono(uint16_t x,
                                         uint16_t y,
                                         const ST7789_BitmapMono_t *bmp,
@@ -1757,6 +2115,10 @@ HAL_StatusTypeDef ST7789_DrawBitmapMono(uint16_t x,
     return HAL_OK;
 }
 
+/**
+ * @brief Draws an RGB565 bitmap.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawBitmapRGB565(uint16_t x,
                                           uint16_t y,
                                           const ST7789_BitmapRGB565_t *bmp)
@@ -1769,6 +2131,10 @@ HAL_StatusTypeDef ST7789_DrawBitmapRGB565(uint16_t x,
     return ST7789_WriteImageRGB565(x, y, bmp->width, bmp->height, bmp->data);
 }
 
+/**
+ * @brief Draws an RGB565 bitmap using DMA when supported.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_DrawBitmapRGB565DMA(uint16_t x,
                                              uint16_t y,
                                              const ST7789_BitmapRGB565_t *bmp)
@@ -1781,6 +2147,11 @@ HAL_StatusTypeDef ST7789_DrawBitmapRGB565DMA(uint16_t x,
     return ST7789_WriteImageRGB565DMA(x, y, bmp->width, bmp->height, bmp->data);
 }
 
+/**
+ * @brief Waits for the active DMA transaction to finish.
+ * @param timeout Timeout in milliseconds.
+ * @return HAL_OK when DMA completes, HAL_TIMEOUT on timeout, or an error status.
+ */
 HAL_StatusTypeDef ST7789_WaitForDma(uint32_t timeout)
 {
 #if (ST7789_USE_DMA != 0)
@@ -1804,6 +2175,10 @@ HAL_StatusTypeDef ST7789_WaitForDma(uint32_t timeout)
 #endif
 }
 
+/**
+ * @brief Reports whether a DMA transaction is in progress.
+ * @return true when DMA is busy, false otherwise.
+ */
 bool ST7789_IsDmaBusy(void)
 {
 #if (ST7789_USE_DMA != 0)
@@ -1814,6 +2189,10 @@ bool ST7789_IsDmaBusy(void)
 }
 
 #if (ST7789_USE_DMA != 0) && (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
+/**
+ * @brief HAL SPI transmit-complete hook forwarded to the ST7789 DMA state machine.
+ * @param hspi SPI handle from the HAL callback.
+ */
 void ST7789_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 {
     if ((!st7789_dma.busy) || (st7789.hspi != hspi))
@@ -1831,6 +2210,10 @@ void ST7789_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
     }
 }
 
+/**
+ * @brief HAL SPI error hook forwarded to the ST7789 DMA state machine.
+ * @param hspi SPI handle from the HAL callback.
+ */
 void ST7789_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
     if ((!st7789_dma.busy) || (st7789.hspi != hspi))
@@ -1843,11 +2226,29 @@ void ST7789_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
 #endif
 
 #if (ST7789_ENABLE_TESTS != 0)
+/** @}
+ */
+
+/* -------------------------------------------------------------------------- */
+/** @name Optional public test API
+ *  @{
+ */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief Helper used by test routines to stop at the first HAL error.
+ * @param status Status returned by a drawing operation.
+ * @return The same status value received as input.
+ */
 static HAL_StatusTypeDef ST7789_Test_Check(HAL_StatusTypeDef status)
 {
     return (status == HAL_OK) ? HAL_OK : status;
 }
 
+/**
+ * @brief Draws vertical color bars for display validation.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_Test_ColorBars(void)
 {
     const uint16_t colors[] = {
@@ -1880,6 +2281,10 @@ HAL_StatusTypeDef ST7789_Test_ColorBars(void)
     return HAL_OK;
 }
 
+/**
+ * @brief Draws basic geometric primitives for display validation.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_Test_Shapes(void)
 {
     uint16_t w = ST7789_GetWidth();
@@ -1910,6 +2315,10 @@ HAL_StatusTypeDef ST7789_Test_Shapes(void)
     return ST7789_FillTriangle((uint16_t)(w / 2U), (uint16_t)(h - 20U), (uint16_t)((2U * w) / 3U), (uint16_t)(h - 80U), (uint16_t)(w - 20U), (uint16_t)(h - 20U), ST7789_COLOR565(0U, 255U, 255U));
 }
 
+/**
+ * @brief Cycles through display rotations and draws orientation markers.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_Test_Rotation(void)
 {
     ST7789_Rotation_t original = ST7789_GetRotation();
@@ -1941,6 +2350,11 @@ HAL_StatusTypeDef ST7789_Test_Rotation(void)
     return ST7789_SetRotation(original);
 }
 
+/**
+ * @brief Draws a centered text test screen.
+ * @param font Pointer to the font used by the test.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_Test_Text(const FontDef_t *font)
 {
     HAL_StatusTypeDef status;
@@ -1967,6 +2381,11 @@ HAL_StatusTypeDef ST7789_Test_Text(const FontDef_t *font)
     return ST7789_Test_Check(status);
 }
 
+/**
+ * @brief Runs all enabled display test routines.
+ * @param font Pointer to the font used by the text test, or NULL to skip it.
+ * @return HAL_OK on success, otherwise an error status.
+ */
 HAL_StatusTypeDef ST7789_Test_Full(const FontDef_t *font)
 {
     HAL_StatusTypeDef status;
@@ -1992,3 +2411,5 @@ HAL_StatusTypeDef ST7789_Test_Full(const FontDef_t *font)
     return HAL_OK;
 }
 #endif
+/** @}
+ */
