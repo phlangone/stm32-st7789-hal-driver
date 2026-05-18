@@ -94,6 +94,14 @@ typedef enum
 #define ST7789_INIT_GPIO 0
 #endif
 
+#ifndef ST7789_USE_DMA
+#define ST7789_USE_DMA 0
+#endif
+
+#if !defined(HAL_SPI_MODULE_ENABLED)
+typedef struct __SPI_HandleTypeDef SPI_HandleTypeDef;
+#endif
+
 #if !defined(ST7789_TX_CHUNK_SIZE) || (ST7789_TX_CHUNK_SIZE < 2U)
 #error "ST7789_TX_CHUNK_SIZE deve ser pelo menos 2."
 #endif
@@ -359,27 +367,13 @@ HAL_StatusTypeDef ST7789_WriteImageRGB565DMA(uint16_t x,
 uint16_t ST7789_CharWidth(const FontDef_t *font);
 /**
  * @brief Returns the character height for the given font.
- * @param font Pointer to the font definition.
  */
 uint16_t ST7789_CharHeight(const FontDef_t *font);
 /**
  * @brief Calculates the width of a single text line.
- * @param font Pointer to the font definition.
- * @param text Text to be measured.
- * @param spacing Extra spacing between characters.
  */
 uint16_t ST7789_TextWidth(const FontDef_t *font, const char *text, uint16_t spacing);
 
-/**
- * @brief Draws one character using the given font.
- * @param x Start X coordinate.
- * @param y Start Y coordinate.
- * @param ch Character to draw.
- * @param font Pointer to the font definition.
- * @param fg Character color in RGB565.
- * @param bg Background color in RGB565.
- * @param transparent true to skip background pixels.
- */
 HAL_StatusTypeDef ST7789_DrawChar(uint16_t x,
                                   uint16_t y,
                                   char ch,
@@ -387,17 +381,6 @@ HAL_StatusTypeDef ST7789_DrawChar(uint16_t x,
                                   uint16_t fg,
                                   uint16_t bg,
                                   bool transparent);
-/**
- * @brief Draws a string on the screen.
- * @param x Start X coordinate.
- * @param y Start Y coordinate.
- * @param text Null-terminated text.
- * @param font Pointer to the font definition.
- * @param fg Text color in RGB565.
- * @param bg Background color in RGB565.
- * @param transparent true to use transparent background.
- * @param spacing Extra spacing between characters.
- */
 HAL_StatusTypeDef ST7789_DrawText(uint16_t x,
                                   uint16_t y,
                                   const char *text,
@@ -406,19 +389,6 @@ HAL_StatusTypeDef ST7789_DrawText(uint16_t x,
                                   uint16_t bg,
                                   bool transparent,
                                   uint16_t spacing);
-/**
- * @brief Draws a string centered inside a rectangular area.
- * @param x Area X coordinate.
- * @param y Area Y coordinate.
- * @param w Area width.
- * @param h Area height.
- * @param text Null-terminated text.
- * @param font Pointer to the font definition.
- * @param fg Text color in RGB565.
- * @param bg Background color in RGB565.
- * @param transparent true to use transparent background.
- * @param spacing Extra spacing between characters.
- */
 HAL_StatusTypeDef ST7789_DrawTextCentered(uint16_t x,
                                           uint16_t y,
                                           uint16_t w,
@@ -429,36 +399,15 @@ HAL_StatusTypeDef ST7789_DrawTextCentered(uint16_t x,
                                           uint16_t bg,
                                           bool transparent,
                                           uint16_t spacing);
-/**
- * @brief Draws a monochrome bitmap.
- * @param x Start X coordinate.
- * @param y Start Y coordinate.
- * @param bmp Pointer to the bitmap.
- * @param fg Active pixel color in RGB565.
- * @param bg Background color in RGB565.
- * @param transparent true to skip inactive pixels.
- */
 HAL_StatusTypeDef ST7789_DrawBitmapMono(uint16_t x,
                                         uint16_t y,
                                         const ST7789_BitmapMono_t *bmp,
                                         uint16_t fg,
                                         uint16_t bg,
                                         bool transparent);
-/**
- * @brief Draws an RGB565 bitmap.
- * @param x Start X coordinate.
- * @param y Start Y coordinate.
- * @param bmp Pointer to the bitmap.
- */
 HAL_StatusTypeDef ST7789_DrawBitmapRGB565(uint16_t x,
                                           uint16_t y,
                                           const ST7789_BitmapRGB565_t *bmp);
-/**
- * @brief Draws an RGB565 bitmap using DMA when available.
- * @param x Start X coordinate.
- * @param y Start Y coordinate.
- * @param bmp Pointer to the bitmap.
- */
 HAL_StatusTypeDef ST7789_DrawBitmapRGB565DMA(uint16_t x,
                                              uint16_t y,
                                              const ST7789_BitmapRGB565_t *bmp);
@@ -470,6 +419,8 @@ HAL_StatusTypeDef ST7789_DrawBitmapRGB565DMA(uint16_t x,
 HAL_StatusTypeDef ST7789_WaitForDma(uint32_t timeout);
 /** @brief Returns whether a DMA transfer is currently in progress. */
 bool ST7789_IsDmaBusy(void);
+
+#if (ST7789_USE_DMA != 0) && (ST7789_INTERFACE == ST7789_INTERFACE_SPI)
 /**
  * @brief SPI transmit-complete callback used by the driver.
  * @param hspi SPI handle received from HAL.
@@ -480,6 +431,7 @@ void ST7789_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi);
  * @param hspi SPI handle received from HAL.
  */
 void ST7789_SPI_ErrorCallback(SPI_HandleTypeDef *hspi);
+#endif
 
 #ifdef __cplusplus
 }
