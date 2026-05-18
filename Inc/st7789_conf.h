@@ -47,6 +47,15 @@
 #define ST7789_DMA_TIMEOUT_MS      100U
 
 /**
+ * @brief Enables DMA-related API callbacks and transfer support.
+ *
+ * Keep this disabled when the project does not configure SPI with DMA in
+ * CubeMX. Enable it only when the selected interface is SPI and the HAL SPI
+ * module is available.
+ */
+#define ST7789_USE_DMA             0
+
+/**
  * @brief Defines DMA function behavior when the parallel interface is used.
  *
  * When enabled, DMA functions use the blocking implementation as fallback.
@@ -105,8 +114,8 @@
 #endif
 
 /** @brief Optional common pins. Set the port to NULL when not used. */
-#define ST7789_RST_PORT			   GPIOC //GPIOB
-#define ST7789_RST_PIN			   GPIO_PIN_1   //GPIO_PIN_5
+#define ST7789_RST_PORT            GPIOC //GPIOB
+#define ST7789_RST_PIN             GPIO_PIN_1   //GPIO_PIN_5
 
 #define ST7789_BL_PORT             NULL //GPIOA
 #define ST7789_BL_PIN              0U   //GPIO_PIN_8
