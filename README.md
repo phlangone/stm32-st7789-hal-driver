@@ -2,20 +2,22 @@
 
 Simple ST7789 TFT display driver for STM32 projects using the HAL library.
 
-The driver provides a small API for display initialization, rotation control, backlight control, pixel drawing, rectangle filling, RGB565 image writing, text rendering and basic bitmap drawing.
+The driver provides a small API for display initialization, rotation control, backlight control, pixel drawing, rectangle, circle and triangle primitives, RGB565 image writing, text rendering and basic bitmap drawing.
 
 ## Features
 
 - SPI blocking mode
-- SPI with DMA
+- SPI with optional DMA support
 - 8-bit 8080 parallel interface
 - Display rotation control
 - Backlight control
 - RGB565 color support
 - Basic drawing primitives
+- Rectangle, circle and triangle drawing
 - Text drawing support
 - RGB565 image writing
 - Optional internal GPIO initialization
+- Optional display test functions
 
 ## Repository structure
 
@@ -86,6 +88,30 @@ Configure the default rotation, color order and inversion mode:
 #define ST7789_INVERTED          1
 ```
 
+Enable or disable DMA support:
+
+```c
+#define ST7789_USE_DMA 0
+```
+
+Keep `ST7789_USE_DMA` disabled when the project does not configure SPI with DMA in STM32CubeMX. Enable it only when using the SPI interface with a configured TX DMA channel:
+
+```c
+#define ST7789_USE_DMA 1
+```
+
+Optional display test functions can be enabled during board bring-up:
+
+```c
+#define ST7789_ENABLE_TESTS 1
+```
+
+After validating the display, disable them again:
+
+```c
+#define ST7789_ENABLE_TESTS 0
+```
+
 ## GPIO configuration
 
 GPIOs can be configured either in STM32CubeMX or directly by the driver.
@@ -129,6 +155,7 @@ In `st7789_conf.h`:
 
 ```c
 #define ST7789_INTERFACE  ST7789_INTERFACE_SPI
+#define ST7789_USE_DMA    0
 #define ST7789_SPI_HANDLE hspi2
 ```
 
@@ -166,6 +193,14 @@ Make sure the generated project includes:
 - DMA initialization
 - DMA interrupt configuration
 
+In `st7789_conf.h`:
+
+```c
+#define ST7789_INTERFACE  ST7789_INTERFACE_SPI
+#define ST7789_USE_DMA    1
+#define ST7789_SPI_HANDLE hspi2
+```
+
 Example:
 
 ```c
@@ -196,7 +231,7 @@ int main(void)
 }
 ```
 
-Forward the HAL SPI callbacks to the driver:
+Forward the HAL SPI callbacks to the driver only when `ST7789_USE_DMA` is enabled:
 
 ```c
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
@@ -229,6 +264,7 @@ In `st7789_conf.h`:
 
 ```c
 #define ST7789_INTERFACE ST7789_INTERFACE_PARALLEL
+#define ST7789_USE_DMA   0
 ```
 
 Configure the control pins:
@@ -314,6 +350,10 @@ ST7789_DrawFastHLine(20, 40, 100, ST7789_COLOR565(255, 0, 0));
 ST7789_DrawFastVLine(20, 40, 100, ST7789_COLOR565(0, 255, 0));
 ST7789_DrawRect(10, 10, 80, 40, ST7789_COLOR565(255, 255, 255));
 ST7789_FillRect(100, 50, 60, 60, ST7789_COLOR565(0, 0, 255));
+ST7789_DrawCircle(80, 160, 30, ST7789_COLOR565(255, 255, 0));
+ST7789_FillCircle(160, 160, 30, ST7789_COLOR565(0, 255, 255));
+ST7789_DrawTriangle(20, 250, 100, 200, 180, 250, ST7789_COLOR565(255, 0, 255));
+ST7789_FillTriangle(120, 250, 180, 200, 230, 250, ST7789_COLOR565(0, 255, 0));
 ```
 
 ## Text drawing
@@ -326,6 +366,19 @@ ST7789_DrawText(10,
                 ST7789_COLOR565(255, 255, 255),
                 ST7789_COLOR565(0, 0, 0),
                 false,
+                1);
+```
+
+Use transparent background when you do not want the function to repaint inactive font pixels:
+
+```c
+ST7789_DrawText(10,
+                40,
+                "Transparent text",
+                &Font_11x18,
+                ST7789_COLOR565(255, 255, 0),
+                ST7789_COLOR565(0, 0, 0),
+                true,
                 1);
 ```
 
@@ -346,13 +399,108 @@ ST7789_WriteImageRGB565DMA(0, 0, 100, 100, image_data);
 ST7789_WaitForDma(HAL_MAX_DELAY);
 ```
 
+## Optional display tests
+
+The driver can compile optional test helpers for quick display validation.
+
+Enable them in `st7789_conf.h`:
+
+```c
+#define ST7789_ENABLE_TESTS 1
+```
+
+Use the test functions from your application after `ST7789_Init()`:
+
+```c
+ST7789_Init();
+
+ST7789_Test_ColorBars();
+HAL_Delay(1000);
+
+ST7789_Test_Shapes();
+HAL_Delay(1000);
+
+ST7789_Test_Rotation();
+HAL_Delay(1000);
+
+ST7789_Test_Full(&Font_11x18);
+```
+
+Available test helpers:
+
+```c
+ST7789_Test_ColorBars();
+ST7789_Test_Shapes();
+ST7789_Test_Rotation();
+ST7789_Test_Text(&Font_11x18);
+ST7789_Test_Full(&Font_11x18);
+```
+
+You may pass `NULL` to `ST7789_Test_Full()` to skip the text test:
+
+```c
+ST7789_Test_Full(NULL);
+```
+
+Disable the tests after validating the display:
+
+```c
+#define ST7789_ENABLE_TESTS 0
+```
+
+## Troubleshooting
+
+### Build error related to `SPI_HandleTypeDef`
+
+If your project does not use SPI with DMA and you see errors related to `SPI_HandleTypeDef`, keep DMA support disabled:
+
+```c
+#define ST7789_USE_DMA 0
+```
+
+Only enable it when SPI and TX DMA are configured in STM32CubeMX.
+
+### Shapes appear correctly, but text appears mirrored
+
+If geometric primitives look correct but text appears horizontally mirrored, the issue is probably related to the bit order expected by the selected font data. Check the bit-reading logic used by the font renderer and confirm that the font table stores the leftmost pixel in the expected bit position.
+
+### Everything appears mirrored or rotated incorrectly
+
+If text and shapes are both mirrored or rotated incorrectly, adjust:
+
+```c
+#define ST7789_DEFAULT_ROTATION ST7789_ROTATION_0
+```
+
+and review the `MADCTL` configuration used by the selected rotation.
+
+### Wrong colors
+
+If red and blue appear swapped, try changing the color order:
+
+```c
+#define ST7789_COLOR_ORDER ST7789_MADCTL_RGB
+```
+
+or:
+
+```c
+#define ST7789_COLOR_ORDER ST7789_MADCTL_BGR
+```
+
+### Parallel interface shows corrupted pixels
+
+Check the data bus mapping carefully. `D0` on the display must match `ST7789_D0_*`, `D1` must match `ST7789_D1_*`, and so on up to `D7`.
+
 ## Notes
 
 - SPI and DMA peripherals must be configured in STM32CubeMX when used.
+- Keep `ST7789_USE_DMA` disabled when DMA is not configured.
 - GPIOs may be configured in STM32CubeMX or internally by the driver.
 - Image data must be in RGB565 format.
 - Text functions require a compatible `FontDef_t` font definition.
 - The configuration file must match your hardware wiring.
+- Optional test functions are intended for validation and can be disabled after bring-up.
 
 ## License
 
