@@ -333,6 +333,15 @@ HAL_StatusTypeDef ST7789_DrawFastHLine(uint16_t x, uint16_t y, uint16_t w, uint1
  */
 HAL_StatusTypeDef ST7789_DrawFastVLine(uint16_t x, uint16_t y, uint16_t h, uint16_t color);
 /**
+ * @brief Draws a generic line between two points.
+ * @param x0 Start X coordinate.
+ * @param y0 Start Y coordinate.
+ * @param x1 End X coordinate.
+ * @param y1 End Y coordinate.
+ * @param color RGB565 color.
+ */
+HAL_StatusTypeDef ST7789_DrawLine(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color);
+/**
  * @brief Draws a rectangle outline.
  * @param x Start X coordinate.
  * @param y Start Y coordinate.
