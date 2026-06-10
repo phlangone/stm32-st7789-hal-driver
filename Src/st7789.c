@@ -1260,6 +1260,24 @@ HAL_StatusTypeDef ST7789_DrawFastVLine(uint16_t x, uint16_t y, uint16_t h, uint1
 }
 
 /**
+ * @brief Draws a vertical line.
+ * @return HAL_OK on success, otherwise an error status.
+ */
+HAL_StatusTypeDef ST7789_DrawFastVLine(uint16_t x, uint16_t y, uint16_t h, uint16_t color)
+{
+    return ST7789_FillRect(x, y, 1U, h, color);
+}
+
+/**
+ * @brief Draws a line.
+ * @return HAL_OK on success, otherwise an error status.
+ */
+HAL_StatusTypeDef ST7789_DrawLine(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, uint16_t color)
+{
+    return ST7789_DrawLineBresenham(x0, y0, x1, y1, color);
+}
+
+/**
  * @brief Draws a rectangle outline.
  * @return HAL_OK on success, otherwise an error status.
  */
